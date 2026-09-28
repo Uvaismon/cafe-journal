@@ -47,7 +47,12 @@ async function loadCafes(){
   if(error){ toast(error.message); return; }
   cafes=data||[];
   await attachPhotoUrls(cafes);
+  renderAmbientPhotos();
   render();
+  if(!$("detailView").classList.contains("hidden")){
+    const selected=cafes.find(cafe=>cafe.id===$("detailContent").dataset.cafeId);
+    if(selected)renderCafeDetails(selected);
+  }
 }
 
 async function attachPhotoUrls(list){
@@ -62,6 +67,39 @@ async function attachPhotoUrls(list){
 function photoMarkup(c){
   if(!c.photoUrls?.length) return "";
   return `<div class="cafe-photos">${c.photoUrls.slice(0,3).map((p,i)=>`<img class="cafe-photo" src="${p.url}" alt="Café photo" onclick="openLightbox('${c.id}',${i})">`).join("")}${c.photoUrls.length>3?`<span class="photo-count">+${c.photoUrls.length-3} more</span>`:""}</div>`;
+}
+
+function renderAmbientPhotos(){
+  const layer=$("ambientPhotos");
+  if(!layer)return;
+  const photos=cafes.flatMap(c=>c.photoUrls||[]);
+  for(let i=photos.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [photos[i],photos[j]]=[photos[j],photos[i]];
+  }
+  renderSidebarPhotos(photos);
+  layer.replaceChildren(...photos.slice(0,6).map(photo=>{
+    const frame=document.createElement("div");
+    frame.className="ambient-photo";
+    const image=document.createElement("img");
+    image.src=photo.url;
+    image.alt="";
+    image.loading="lazy";
+    frame.append(image);
+    return frame;
+  }));
+}
+
+function renderSidebarPhotos(photos){
+  const strip=$("sidebarPhotos");
+  if(!strip)return;
+  strip.replaceChildren(...photos.slice(0,2).map(photo=>{
+    const image=document.createElement("img");
+    image.src=photo.url;
+    image.alt="";
+    image.loading="lazy";
+    return image;
+  }));
 }
 
 function render(){
@@ -95,17 +133,54 @@ function renderGrid(id, list){
   if(!list.length){ el.innerHTML=`<div class="empty">☕<br><br>No café memories here yet.${currentUser?'<br><button class="primary" style="margin-top:14px" onclick="openModal()">Add your first one →</button>':""}</div>`; return; }
   el.innerHTML=list.map(c=>{
     const r=Number(c.overall_rating ?? overall(c) ?? 0);
-    return `<article class="cafe-card">
-      <div class="top"><div><h4>${esc(c.name)}</h4><div class="location">${esc(c.area||"A little corner somewhere")}</div></div><span class="heart">${c.favourite?"♥":"♡"}</span></div>
+    return `<article class="cafe-card" tabindex="0" aria-label="View details for ${esc(c.name)}" onclick="openCafeDetails('${c.id}',event)" onkeydown="openCafeDetails('${c.id}',event)">
+      <div class="top"><div><h4>${esc(c.name)}</h4><div class="location">${esc(c.area||"A little corner somewhere")}</div></div><button type="button" class="heart" data-cafe-id="${c.id}" aria-label="${c.favourite?"Remove from favourites":"Add to favourites"}" aria-pressed="${!!c.favourite}" onclick="event.stopPropagation();toggleFavourite('${c.id}')">${c.favourite?"♥":"♡"}</button></div>
       <div class="rating">${stars(r)} <span style="color:#7a6f68;font-size:11px">${r?` ${r}`:""}</span></div>
       ${c.vibe?`<span class="tag">${esc(c.vibe)}</span>`:""} ${c.revisit==="Yes"?'<span class="tag" style="background:#eaf0e5">↻ Revisit</span>':""}
       ${c.notes?`<p class="note">“${esc(c.notes)}”</p>`:""}
-      ${photoMarkup(c)}
+      ${c.photoUrls?.length?`<div class="cafe-photos">${c.photoUrls.slice(0,3).map((p,i)=>`<img class="cafe-photo" src="${p.url}" alt="Café photo" onclick="event.stopPropagation();openLightbox('${c.id}',${i})">`).join("")}${c.photoUrls.length>3?`<span class="photo-count">+${c.photoUrls.length-3} more</span>`:""}</div>`:""}
       <div class="meta"><span>${dateText(c.visited_at)}</span><span>${c.spend?`₹${Number(c.spend).toLocaleString("en-IN")}`:""}</span></div>
-      ${currentUser?`<div class="card-actions"><button onclick="editCafe('${c.id}')">Edit</button><button onclick="deleteCafe('${c.id}')">Delete</button></div>`:""}
+      ${currentUser?`<div class="card-actions"><button onclick="event.stopPropagation();editCafe('${c.id}')">Edit</button><button onclick="event.stopPropagation();deleteCafe('${c.id}')">Delete</button></div>`:""}
     </article>`;
   }).join("");
 }
+
+function openCafeDetails(id,event){
+  if(event?.target?.closest("button, img, a, input, select, textarea"))return;
+  if(event?.type==="keydown" && event.key!=="Enter" && event.key!==" ")return;
+  if(event?.type==="keydown")event.preventDefault();
+  const cafe=cafes.find(item=>item.id===id);
+  if(!cafe)return;
+  renderCafeDetails(cafe);
+  $("detailView").classList.remove("hidden");
+  $("detailClose").focus();
+}
+
+function renderCafeDetails(c){
+  $("detailContent").dataset.cafeId=c.id;
+  const ratings=[
+    ["Coffee",c.coffee],["Food",c.food],["Ambience",c.ambience],["Wi-Fi",c.wifi]
+  ].filter(([,value])=>value!=null && value!=="");
+  const rating=Number(c.overall_rating ?? overall(c) ?? 0);
+  $("detailContent").innerHTML=`
+    <header class="detail-heading">
+      <div><p class="eyebrow">CAFÉ MEMORY</p><h1>${esc(c.name)}</h1><p class="detail-location">${esc(c.area||"A little corner somewhere")}</p></div>
+      <button type="button" class="heart detail-heart" data-cafe-id="${c.id}" aria-label="${c.favourite?"Remove from favourites":"Add to favourites"}" aria-pressed="${!!c.favourite}" onclick="toggleFavourite('${c.id}')">${c.favourite?"♥":"♡"}</button>
+    </header>
+    <div class="detail-rating"><strong>${stars(rating)}</strong>${rating?`<span>${rating.toFixed(1)} / 5</span>`:"<span>No overall rating yet</span>"}</div>
+    <div class="detail-tags">${c.vibe?`<span class="tag">${esc(c.vibe)}</span>`:""}${c.revisit==="Yes"?'<span class="tag revisit-tag">↻ Worth revisiting</span>':""}${c.favourite?'<span class="tag favourite-tag">♥ Favourite</span>':""}</div>
+    ${c.photoUrls?.length?`<div class="detail-photos">${c.photoUrls.map((p,i)=>`<img src="${esc(p.url)}" alt="${esc(c.name)} café photo ${i+1}" loading="lazy" onclick="openLightbox('${c.id}',${i})">`).join("")}</div>`:""}
+    <div class="detail-sections">
+      <section class="detail-panel"><h2>Visit</h2><dl><div><dt>Date visited</dt><dd>${dateText(c.visited_at)}</dd></div><div><dt>Spent</dt><dd>${c.spend?`₹${Number(c.spend).toLocaleString("en-IN")}`:"Not recorded"}</dd></div><div><dt>Revisit</dt><dd>${esc(c.revisit||"Not decided")}</dd></div></dl></section>
+      ${ratings.length?`<section class="detail-panel"><h2>Ratings</h2><dl>${ratings.map(([label,value])=>`<div><dt>${label}</dt><dd>${Number(value)} / 5</dd></div>`).join("")}</dl></section>`:""}
+      ${c.had?`<section class="detail-panel"><h2>What I had</h2><p>${esc(c.had)}</p></section>`:""}
+      ${c.notes?`<section class="detail-panel detail-notes"><h2>Notes</h2><p>${esc(c.notes)}</p></section>`:""}
+    </div>
+    ${currentUser?`<div class="detail-actions"><button type="button" class="secondary" onclick="editCafe('${c.id}')">Edit memory</button><button type="button" class="danger-button" onclick="deleteCafe('${c.id}')">Delete memory</button></div>`:""}
+  `;
+}
+
+function closeCafeDetails(){$("detailView").classList.add("hidden")}
 
 function switchView(view){
   document.querySelectorAll(".view").forEach(v=>v.classList.add("hidden"));
@@ -201,9 +276,27 @@ async function deleteCafe(id){
 
   const {error}=await sb.from("cafes").delete().eq("id",id);
   if(error){toast(error.message);return}
-  await loadCafes();toast("Memory removed");
+  await loadCafes();closeCafeDetails();toast("Memory removed");
 }
-function editCafe(id){if(!currentUser){showAuth();return}const c=cafes.find(x=>x.id===id);if(c)openModal(c)}
+function editCafe(id){if(!currentUser){showAuth();return}const c=cafes.find(x=>x.id===id);if(c){closeCafeDetails();openModal(c)}}
+async function toggleFavourite(id){
+  if(!currentUser){$("authMessage").textContent="Sign in as an editor to save favourites.";showAuth();return}
+  const cafe=cafes.find(item=>item.id===id);
+  if(!cafe)return;
+  const nextFavourite=!cafe.favourite;
+  const buttons=[...document.querySelectorAll(`.heart[data-cafe-id="${id}"]`)];
+  buttons.forEach(button=>button.disabled=true);
+  try{
+    const {error}=await sb.from("cafes").update({favourite:nextFavourite}).eq("id",id);
+    if(error){buttons.forEach(button=>button.disabled=false);toast("Could not update favourite: "+error.message);return}
+    cafe.favourite=nextFavourite;
+    render();
+    if(!$("detailView").classList.contains("hidden"))renderCafeDetails(cafe);
+  }catch(error){
+    buttons.forEach(button=>button.disabled=false);
+    toast("Could not update favourite: "+(error?.message||"Please try again."));
+  }
+}
 
 $("authForm").addEventListener("submit",async e=>{
   e.preventDefault();if(!sb){showAuth();return}
@@ -223,6 +316,8 @@ if(window.visualViewport){
 $("signIn").addEventListener("click",showAuth);
 $("authClose").addEventListener("click",()=>$("authView").classList.add("hidden"));
 $("signOut").addEventListener("click",async()=>{await sb.auth.signOut();showApp(null)});
+$("detailClose").addEventListener("click",closeCafeDetails);
+$("detailView").addEventListener("click",e=>{if(e.target.id==="detailView")closeCafeDetails()});
 $("addCafe").addEventListener("click",()=>openModal());
 $("closeModal").addEventListener("click",closeModal);$("cancelModal").addEventListener("click",closeModal);
 $("cafeForm").addEventListener("submit",saveCafe);
@@ -254,8 +349,11 @@ $("lightboxPrev").addEventListener("click",()=>moveLightbox(-1));
 $("lightboxNext").addEventListener("click",()=>moveLightbox(1));
 $("lightbox").addEventListener("click",e=>{if(e.target.id==="lightbox")closeLightbox()});
 document.addEventListener("keydown",e=>{
-  if($("lightbox").classList.contains("hidden"))return;
-  if(e.key==="Escape")closeLightbox();
-  if(e.key==="ArrowLeft")moveLightbox(-1);
-  if(e.key==="ArrowRight")moveLightbox(1);
+  if(!$("lightbox").classList.contains("hidden")){
+    if(e.key==="Escape")closeLightbox();
+    if(e.key==="ArrowLeft")moveLightbox(-1);
+    if(e.key==="ArrowRight")moveLightbox(1);
+    return;
+  }
+  if(e.key==="Escape"&&!$("detailView").classList.contains("hidden"))closeCafeDetails();
 });

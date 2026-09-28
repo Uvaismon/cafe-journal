@@ -9,6 +9,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+  <div id="ambientPhotos" class="ambient-photos" aria-hidden="true"></div>
   <div id="toast" class="toast"></div>
 
   <section id="authView" class="auth-shell hidden">
@@ -31,7 +32,8 @@
 
   <section id="appView" class="app-shell">
     <aside class="sidebar">
-      <div class="sidebar-brand"><span>☕</span><div><strong>Café</strong><small>Journal</small></div></div>
+      <div id="sidebarPhotos" class="sidebar-photos" aria-hidden="true"></div>
+      <div class="sidebar-brand"><span>☕</span><div class="sidebar-brand-name"><strong>Café</strong><small>Journal</small></div></div>
       <nav>
         <button class="nav-item active" data-view="home">⌂ <span>Overview</span></button>
         <button class="nav-item" data-view="cafes">☕ <span>All cafés</span></button>
@@ -90,6 +92,13 @@
         <div id="favGrid" class="cafe-grid"></div>
       </div>
     </main>
+  </section>
+
+  <section id="detailView" class="detail-view hidden" role="dialog" aria-modal="true" aria-label="Café details">
+    <div class="detail-page">
+      <header class="detail-nav"><button type="button" id="detailClose" class="secondary">← Back to journal</button><span>CAFÉ JOURNAL</span></header>
+      <div id="detailContent"></div>
+    </div>
   </section>
 
   <div id="modal" class="modal hidden">
