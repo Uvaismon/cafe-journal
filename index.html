@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#3b241a" />
+  <title>Café Journal</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div id="toast" class="toast"></div>
+
+  <section id="authView" class="auth-shell hidden">
+    <div class="auth-card">
+      <button id="authClose" class="modal-close" type="button" aria-label="Close sign in">×</button>
+      <div class="brand-mark">☕</div>
+      <p class="eyebrow">YOUR LITTLE COFFEE DIARY</p>
+      <h1>Every café has<br><em>a story.</em></h1>
+      <p class="auth-copy">Keep your coffees, favourite corners and memorable café visits in one beautiful little journal.</p>
+
+      <form id="authForm">
+        <label>Email<input id="email" type="email" autocomplete="email" required placeholder="you@example.com"></label>
+        <label>Password<input id="password" type="password" autocomplete="current-password" required minlength="6" placeholder="At least 6 characters"></label>
+        <button class="primary wide" type="submit" id="authSubmit">Enter my journal →</button>
+      </form>
+      <p id="authMessage" class="form-message"></p>
+      <p class="privacy-note">Sign-in is limited to authorized accounts. Ask your administrator for access.</p>
+    </div>
+  </section>
+
+  <section id="appView" class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-brand"><span>☕</span><div><strong>Café</strong><small>Journal</small></div></div>
+      <nav>
+        <button class="nav-item active" data-view="home">⌂ <span>Overview</span></button>
+        <button class="nav-item" data-view="cafes">☕ <span>All cafés</span></button>
+        <button class="nav-item" data-view="favourites">♥ <span>Favourites</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="user-pill"><div class="avatar" id="avatar">U</div><div><strong id="userEmail">—</strong><small>My journal</small></div></div>
+        <button id="signOut" class="ghost">Sign out</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">GOOD COFFEE, GOOD MEMORIES</p>
+          <h2 id="pageTitle">Your café journal</h2>
+        </div>
+        <button id="addCafe" class="primary hidden">＋ Add café</button>
+        <button id="signIn" class="secondary">Editor sign in</button>
+      </header>
+
+      <div id="homeView" class="view">
+        <section class="hero-card">
+          <div>
+            <span class="hero-kicker">☕ YOUR COFFEE STORY</span>
+            <h3>A collection of places<br>you've loved.</h3>
+            <p>Track the coffee, the vibe, the little details — and the cafés you want to return to.</p>
+          </div>
+          <div class="hero-art">☕<span>✦</span></div>
+        </section>
+
+        <section class="stats-grid">
+          <div class="stat-card"><span>CAFÉS VISITED</span><strong id="statCount">0</strong><small>little places discovered</small></div>
+          <div class="stat-card"><span>AVERAGE RATING</span><strong id="statRating">—</strong><small>across your visits</small></div>
+          <div class="stat-card rose"><span>FAVOURITES ♥</span><strong id="statFav">0</strong><small>places worth returning to</small></div>
+          <div class="stat-card sage"><span>SPENT</span><strong id="statSpend">₹0</strong><small>on café adventures</small></div>
+        </section>
+
+        <section class="section-head"><div><p class="eyebrow">RECENT MEMORIES</p><h3>Latest visits</h3></div><button class="text-btn" data-view="cafes">See all →</button></section>
+        <div id="recentGrid" class="cafe-grid"></div>
+      </div>
+
+      <div id="cafesView" class="view hidden">
+        <section class="toolbar">
+          <div class="search-wrap">⌕<input id="search" placeholder="Search cafés, cities, notes..."></div>
+          <select id="vibeFilter"><option value="">All vibes</option><option>Cozy</option><option>Quiet</option><option>Work-friendly</option><option>Social</option><option>Aesthetic</option><option>Outdoor</option><option>Quick stop</option></select>
+          <select id="ratingFilter"><option value="">Any rating</option><option value="5">5 ⭐</option><option value="4">4+ ⭐</option><option value="3">3+ ⭐</option></select>
+        </section>
+        <div id="allGrid" class="cafe-grid"></div>
+      </div>
+
+      <div id="favouritesView" class="view hidden">
+        <section class="section-head"><div><p class="eyebrow">THE SHORTLIST</p><h3>♥ Cafés to return to</h3></div></section>
+        <div id="favGrid" class="cafe-grid"></div>
+      </div>
+    </main>
+  </section>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal-card">
+      <button class="modal-close" id="closeModal">×</button>
+      <p class="eyebrow" id="modalEyebrow">NEW MEMORY</p>
+      <h3 id="modalTitle">Add a café</h3>
+      <form id="cafeForm" class="cafe-form">
+        <input type="hidden" id="cafeId">
+        <div class="form-grid">
+          <label class="span2">Café name *<input id="cafeName" required placeholder="e.g. Third Wave Coffee"></label>
+          <label>Area / City<input id="area" placeholder="Indiranagar"></label>
+          <label>Date visited<input id="visitedAt" type="date"></label>
+          <label class="span2">What I had<input id="had" placeholder="Cappuccino + croissant"></label>
+          <label>Coffee ⭐<select id="coffee"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label>Food ⭐<select id="food"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label>Ambience ⭐<select id="ambience"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label>Wi‑Fi ⭐<select id="wifi"><option value="">—</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select></label>
+          <label>Spend ₹<input id="spend" type="number" min="0" step="1" placeholder="650"></label>
+          <label>Vibe<select id="vibe"><option value="">Choose a vibe</option><option>Cozy</option><option>Quiet</option><option>Work-friendly</option><option>Social</option><option>Aesthetic</option><option>Outdoor</option><option>Quick stop</option></select></label>
+          <label>Favourite<select id="favourite"><option value="false">♡ Not yet</option><option value="true">♥ Favourite</option></select></label>
+          <label>Revisit?<select id="revisit"><option>Maybe</option><option>Yes</option><option>No</option></select></label>
+          <label class="span2">Little notes<textarea id="notes" rows="4" placeholder="What made this visit memorable?"></textarea></label>
+          <label class="span2 photo-upload">
+            Café photos
+            <input id="photos" type="file" accept="image/*" multiple>
+            <small>Upload a few memories. JPG, PNG or HEIC are fine.</small>
+            <div id="photoPreview" class="photo-preview"></div>
+          </label>
+        </div>
+        <div class="form-actions"><button type="button" class="secondary" id="cancelModal">Cancel</button><button type="submit" class="primary" id="saveCafe">Save memory ♥</button></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="lightbox" class="lightbox hidden">
+    <button id="lightboxClose" class="lightbox-close">×</button>
+    <button id="lightboxPrev" class="lightbox-nav prev">‹</button>
+    <img id="lightboxImg" alt="Café photo">
+    <button id="lightboxNext" class="lightbox-nav next">›</button>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,226 @@
+const config = window.SUPABASE_CONFIG || {};
+const configured = config.url && !config.url.includes("YOUR-PROJECT") && config.anonKey && !config.anonKey.includes("YOUR_");
+const sb = configured ? supabase.createClient(config.url, config.anonKey, {
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+}) : null;
+
+const $ = id => document.getElementById(id);
+let cafes = [];
+let editingId = null;
+let pendingPhotos = [];
+let lightboxPhotos = [];
+let lightboxIndex = 0;
+let currentUser = null;
+
+function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),2600); }
+function esc(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c])); }
+function stars(v){ if(!v) return "—"; const n=Math.round(Number(v)); return "★".repeat(n)+"☆".repeat(5-n); }
+function overall(c){ const vals=[c.coffee,c.food,c.ambience,c.wifi].filter(v=>v!=null && v!=="").map(Number); return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null; }
+function dateText(d){ if(!d) return "No date"; const x=new Date(d+"T00:00:00"); return x.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
+
+function showAuth(){
+  $("authView").classList.remove("hidden");
+  if(!configured) $("authMessage").textContent="Set up config.js first — see README.md.";
+}
+function showApp(user){
+  $("authView").classList.add("hidden");
+  currentUser=user||null;
+  $("addCafe").classList.toggle("hidden",!currentUser);
+  $("signIn").classList.toggle("hidden",!!currentUser);
+  $("signOut").classList.toggle("hidden",!currentUser);
+  $("userEmail").textContent=currentUser?(currentUser.email || "Editor"):"Public visitor";
+  $("avatar").textContent=currentUser?(currentUser.email||"E")[0].toUpperCase():"☕";
+  render();
+}
+
+async function loadCafes(){
+  if(!sb) return;
+  const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("visited_at",{ascending:false}).order("created_at",{ascending:false});
+  if(error){ toast(error.message); return; }
+  cafes=data||[];
+  await attachPhotoUrls(cafes);
+  render();
+}
+
+async function attachPhotoUrls(list){
+  for(const cafe of list){
+    cafe.photoUrls=[];
+    for(const p of (cafe.cafe_photos||[])){
+      const {data}=sb.storage.from("cafe-photos").getPublicUrl(p.path);
+      if(data?.publicUrl) cafe.photoUrls.push({id:p.id,url:data.publicUrl,path:p.path});
+    }
+  }
+}
+function photoMarkup(c){
+  if(!c.photoUrls?.length) return "";
+  return `<div class="cafe-photos">${c.photoUrls.slice(0,3).map((p,i)=>`<img class="cafe-photo" src="${p.url}" alt="Café photo" onclick="openLightbox('${c.id}',${i})">`).join("")}${c.photoUrls.length>3?`<span class="photo-count">+${c.photoUrls.length-3} more</span>`:""}</div>`;
+}
+
+function render(){
+  const q=($("search")?.value||"").toLowerCase().trim();
+  const vibe=$("vibeFilter")?.value||"";
+  const rf=$("ratingFilter")?.value||"";
+  const filtered=cafes.filter(c=>{
+    const text=[c.name,c.area,c.had,c.vibe,c.notes].join(" ").toLowerCase();
+    const r=Number(c.overall_rating || overall(c) || 0);
+    return (!q||text.includes(q)) && (!vibe||c.vibe===vibe) && (!rf||(rf==="5"?r>=5:r>=Number(rf)));
+  });
+  renderStats();
+  renderGrid("recentGrid",cafes.slice(0,6));
+  renderGrid("allGrid",filtered);
+  renderGrid("favGrid",cafes.filter(c=>c.favourite));
+}
+
+function renderStats(){
+  const count=cafes.length;
+  const ratings=cafes.map(c=>Number(c.overall_rating ?? overall(c))).filter(Boolean);
+  const avg=ratings.length?(ratings.reduce((a,b)=>a+b,0)/ratings.length).toFixed(1):"—";
+  const spend=cafes.reduce((a,c)=>a+Number(c.spend||0),0);
+  $("statCount").textContent=count;
+  $("statRating").textContent=avg;
+  $("statFav").textContent=cafes.filter(c=>c.favourite).length;
+  $("statSpend").textContent="₹"+spend.toLocaleString("en-IN");
+}
+
+function renderGrid(id, list){
+  const el=$(id); if(!el) return;
+  if(!list.length){ el.innerHTML=`<div class="empty">☕<br><br>No café memories here yet.${currentUser?'<br><button class="primary" style="margin-top:14px" onclick="openModal()">Add your first one →</button>':""}</div>`; return; }
+  el.innerHTML=list.map(c=>{
+    const r=Number(c.overall_rating ?? overall(c) ?? 0);
+    return `<article class="cafe-card">
+      <div class="top"><div><h4>${esc(c.name)}</h4><div class="location">${esc(c.area||"A little corner somewhere")}</div></div><span class="heart">${c.favourite?"♥":"♡"}</span></div>
+      <div class="rating">${stars(r)} <span style="color:#7a6f68;font-size:11px">${r?` ${r}`:""}</span></div>
+      ${c.vibe?`<span class="tag">${esc(c.vibe)}</span>`:""} ${c.revisit==="Yes"?'<span class="tag" style="background:#eaf0e5">↻ Revisit</span>':""}
+      ${c.notes?`<p class="note">“${esc(c.notes)}”</p>`:""}
+      ${photoMarkup(c)}
+      <div class="meta"><span>${dateText(c.visited_at)}</span><span>${c.spend?`₹${Number(c.spend).toLocaleString("en-IN")}`:""}</span></div>
+      ${currentUser?`<div class="card-actions"><button onclick="editCafe('${c.id}')">Edit</button><button onclick="deleteCafe('${c.id}')">Delete</button></div>`:""}
+    </article>`;
+  }).join("");
+}
+
+function switchView(view){
+  document.querySelectorAll(".view").forEach(v=>v.classList.add("hidden"));
+  $(view+"View").classList.remove("hidden");
+  document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.view===view));
+  $("pageTitle").textContent=view==="home"?"Your café journal":view==="cafes"?"All cafés":"Favourites";
+}
+
+function openModal(c=null){
+  if(!currentUser){showAuth();return}
+  editingId=c?.id||null;
+  $("modalTitle").textContent=c?"Edit your memory":"Add a café";
+  $("modalEyebrow").textContent=c?"EDIT MEMORY":"NEW MEMORY";
+  $("cafeForm").reset();
+  pendingPhotos=[];
+  $("photoPreview").innerHTML="";
+  if(c){
+    $("cafeId").value=c.id;$("cafeName").value=c.name||"";$("area").value=c.area||"";$("visitedAt").value=c.visited_at||"";
+    $("had").value=c.had||"";$("coffee").value=c.coffee??"";$("food").value=c.food??"";$("ambience").value=c.ambience??"";$("wifi").value=c.wifi??"";
+    $("spend").value=c.spend??"";$("vibe").value=c.vibe||"";$("favourite").value=String(!!c.favourite);$("revisit").value=c.revisit||"Maybe";$("notes").value=c.notes||"";
+  } else {$("visitedAt").value=new Date().toISOString().slice(0,10);}
+  $("modal").classList.remove("hidden");
+}
+function closeModal(){$("modal").classList.add("hidden"); editingId=null;}
+
+$("photos").addEventListener("change", e=>{
+  pendingPhotos=[...e.target.files];
+  $("photoPreview").innerHTML=pendingPhotos.map(f=>`<img class="photo-thumb" src="${URL.createObjectURL(f)}" alt="">`).join("");
+});
+
+async function uploadPhotos(cafeId, files){
+  if(!files.length) return;
+  const user=(await sb.auth.getUser()).data.user;
+  for(const file of files){
+    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+    const path=`${user.id}/${cafeId}/${crypto.randomUUID()}-${safe}`;
+    const {error:uploadError}=await sb.storage.from("cafe-photos").upload(path,file,{upsert:false,contentType:file.type});
+    if(uploadError){toast("Photo upload failed: "+uploadError.message);continue;}
+    const {error:rowError}=await sb.from("cafe_photos").insert({cafe_id:cafeId,path});
+    if(rowError){await sb.storage.from("cafe-photos").remove([path]);toast(rowError.message);}
+  }
+}
+
+async function saveCafe(e){
+  e.preventDefault(); if(!sb||!currentUser) return;
+  const row={
+    name:$("cafeName").value.trim(),area:$("area").value.trim()||null,visited_at:$("visitedAt").value||null,had:$("had").value.trim()||null,
+    coffee:$("coffee").value?Number($("coffee").value):null,food:$("food").value?Number($("food").value):null,
+    ambience:$("ambience").value?Number($("ambience").value):null,wifi:$("wifi").value?Number($("wifi").value):null,
+    spend:$("spend").value?Number($("spend").value):null,vibe:$("vibe").value||null,favourite:$("favourite").value==="true",
+    revisit:$("revisit").value,notes:$("notes").value.trim()||null
+  };
+  let res;
+  let cafeId=editingId;
+  if(editingId){
+    res=await sb.from("cafes").update(row).eq("id",editingId).select("id").single();
+  } else {
+    res=await sb.from("cafes").insert(row).select("id").single();
+    cafeId=res.data?.id;
+  }
+  if(res.error){toast(res.error.message);return}
+  if(cafeId && pendingPhotos.length) await uploadPhotos(cafeId,pendingPhotos);
+  const wasEdit=!!editingId;
+  closeModal();await loadCafes();toast(wasEdit?"Memory updated ♥":"Café saved ♥");
+}
+async function deleteCafe(id){
+  if(!currentUser){showAuth();return}
+  if(!confirm("Delete this café memory?")) return;
+  const cafe=cafes.find(x=>x.id===id);
+  if(cafe?.photoUrls?.length){
+    await sb.from("cafe_photos").delete().eq("cafe_id",id);
+    await sb.storage.from("cafe-photos").remove(cafe.photoUrls.map(p=>p.path));
+  }
+  const {error}=await sb.from("cafes").delete().eq("id",id);
+  if(error){toast(error.message);return}
+  await loadCafes();toast("Memory removed");
+}
+function editCafe(id){if(!currentUser){showAuth();return}const c=cafes.find(x=>x.id===id);if(c)openModal(c)}
+
+$("authForm").addEventListener("submit",async e=>{
+  e.preventDefault();if(!sb){showAuth();return}
+  const email=$("email").value.trim(),password=$("password").value;
+  $("authMessage").textContent="Working…";
+  const res=await sb.auth.signInWithPassword({email,password});
+  if(res.error){$("authMessage").textContent=res.error.message;return}
+  showApp(res.data.user);loadCafes();
+});
+$("signIn").addEventListener("click",showAuth);
+$("authClose").addEventListener("click",()=>$("authView").classList.add("hidden"));
+$("signOut").addEventListener("click",async()=>{await sb.auth.signOut();showApp(null)});
+$("addCafe").addEventListener("click",()=>openModal());
+$("closeModal").addEventListener("click",closeModal);$("cancelModal").addEventListener("click",closeModal);
+$("cafeForm").addEventListener("submit",saveCafe);
+$("search").addEventListener("input",render);$("vibeFilter").addEventListener("change",render);$("ratingFilter").addEventListener("change",render);
+document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>switchView(b.dataset.view)));
+
+(async()=>{
+  if(!sb){showApp(null);showAuth();return}
+  const {data:{session}}=await sb.auth.getSession();
+  showApp(session?.user||null);
+  await loadCafes();
+  sb.auth.onAuthStateChange((_event,session)=>{showApp(session?.user||null);loadCafes()});
+})();
+
+function openLightbox(cafeId,index){
+  const c=cafes.find(x=>x.id===cafeId); if(!c?.photoUrls?.length)return;
+  lightboxPhotos=c.photoUrls; lightboxIndex=index;
+  $("lightboxImg").src=lightboxPhotos[lightboxIndex].url;
+  $("lightbox").classList.remove("hidden");
+}
+function closeLightbox(){$("lightbox").classList.add("hidden")}
+function moveLightbox(delta){
+  if(!lightboxPhotos.length)return;
+  lightboxIndex=(lightboxIndex+delta+lightboxPhotos.length)%lightboxPhotos.length;
+  $("lightboxImg").src=lightboxPhotos[lightboxIndex].url;
+}
+$("lightboxClose").addEventListener("click",closeLightbox);
+$("lightboxPrev").addEventListener("click",()=>moveLightbox(-1));
+$("lightboxNext").addEventListener("click",()=>moveLightbox(1));
+$("lightbox").addEventListener("click",e=>{if(e.target.id==="lightbox")closeLightbox()});
+document.addEventListener("keydown",e=>{
+  if($("lightbox").classList.contains("hidden"))return;
+  if(e.key==="Escape")closeLightbox();
+  if(e.key==="ArrowLeft")moveLightbox(-1);
+  if(e.key==="ArrowRight")moveLightbox(1);
+});
