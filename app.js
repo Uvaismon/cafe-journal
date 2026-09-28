@@ -11,8 +11,8 @@ let pendingPhotos = [];
 let lightboxPhotos = [];
 let lightboxIndex = 0;
 let currentUser = null;
-// Keep this allowlist in sync with the Supabase DELETE RLS policies.
-const deleteAllowedUserIds = new Set(["3104249e-192a-48cf-a54a-b2df2687c17c"]);
+const photoObjectUrls = new Set();
+let deletePermission = false;
 
 function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),9000); }
 function apiErrorText(error){
@@ -29,7 +29,7 @@ function esc(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 function stars(v){ if(!v) return "—"; const n=Math.round(Number(v)); return "★".repeat(n)+"☆".repeat(5-n); }
 function overall(c){ const vals=[c.coffee,c.food,c.ambience,c.wifi].filter(v=>v!=null && v!=="").map(Number); return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null; }
 function dateText(d){ if(!d) return "No date"; const x=new Date(d+"T00:00:00"); return x.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
-function canDeleteCafes(){return !!currentUser && deleteAllowedUserIds.has(currentUser.id);}
+function canDeleteCafes(){return !!currentUser && deletePermission;}
 
 function showAuth(){
   $("authView").classList.remove("hidden");
@@ -44,8 +44,18 @@ function syncAuthViewport(){
   auth.style.setProperty("--visual-viewport-offset-top",`${viewport.offsetTop}px`);
 }
 function showApp(user){
-  $("authView").classList.add("hidden");
-  currentUser=user||null;
+  const nextUser=user||null;
+  if(currentUser?.id!==nextUser?.id)deletePermission=false;
+  currentUser=nextUser;
+  const authenticated=!!currentUser;
+  $("authView").classList.toggle("hidden",authenticated);
+  $("appView").classList.toggle("hidden",!authenticated);
+  if(!authenticated){
+    cafes=[];
+    revokePhotoUrls();
+    closeCafeDetails();
+    closeLightbox();
+  }
   $("addCafe").classList.toggle("hidden",!currentUser);
   $("signIn").classList.toggle("hidden",!!currentUser);
   $("signOut").classList.toggle("hidden",!currentUser);
@@ -55,7 +65,7 @@ function showApp(user){
 }
 
 async function loadCafes(){
-  if(!sb) return false;
+  if(!sb||!currentUser){cafes=[];render();return false}
   try{
   const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("visited_at",{ascending:false}).order("created_at",{ascending:false});
   if(error){ showApiError("Could not load café entries",error); return false; }
@@ -71,14 +81,46 @@ async function loadCafes(){
   }catch(error){showApiError("Could not load café entries",error);return false}
 }
 
+async function refreshDeletePermission(){
+  if(!sb||!currentUser){deletePermission=false;render();return false}
+  const userId=currentUser.id;
+  try{
+    const {data,error}=await sb.rpc("can_delete_cafes");
+    if(error)throw error;
+    if(currentUser?.id!==userId)return false;
+    deletePermission=data===true;
+    render();
+    if(!$("detailView").classList.contains("hidden")){
+      const cafe=cafes.find(item=>item.id===$("detailContent").dataset.cafeId);
+      if(cafe)renderCafeDetails(cafe);
+    }
+    return deletePermission;
+  }catch(error){
+    if(currentUser?.id===userId){
+      deletePermission=false;
+      render();
+      showApiError("Could not verify delete permission",error);
+    }
+    return false;
+  }
+}
+
 async function attachPhotoUrls(list){
+  revokePhotoUrls();
   for(const cafe of list){
     cafe.photoUrls=[];
     for(const p of (cafe.cafe_photos||[])){
-      const {data}=sb.storage.from("cafe-photos").getPublicUrl(p.path);
-      if(data?.publicUrl) cafe.photoUrls.push({id:p.id,url:data.publicUrl,path:p.path});
+      try{
+        const {data,error}=await sb.storage.from("cafe-photos").download(p.path);
+        if(error){showApiError(`Could not load photo for ${cafe.name}`,error);continue}
+        if(data){const url=URL.createObjectURL(data);photoObjectUrls.add(url);cafe.photoUrls.push({id:p.id,url,path:p.path})}
+      }catch(error){showApiError(`Could not load photo for ${cafe.name}`,error)}
     }
   }
+}
+function revokePhotoUrls(){
+  for(const url of photoObjectUrls)URL.revokeObjectURL(url);
+  photoObjectUrls.clear();
 }
 function photoMarkup(c){
   if(!c.photoUrls?.length) return "";
@@ -309,15 +351,24 @@ async function deleteCafe(id){
   if(photoQueryError){showApiError("Could not load café photos for deletion",photoQueryError);return}
 
   const paths=(photos||[]).map(photo=>photo.path).filter(Boolean);
-  if(paths.length){
-    const {error:storageError}=await sb.storage.from("cafe-photos").remove(paths);
-    if(storageError){showApiError("Could not delete café photos",storageError);return}
-  }
-
-  const {error}=await sb.from("cafes").delete().eq("id",id);
+  const {data:deletedRows,error}=await sb.from("cafes").delete().eq("id",id).select("id");
   if(error){showApiError("Could not delete café",error);return}
+  if(!deletedRows?.length){
+    showApiError("Could not delete café","Supabase did not delete this row. Check the delete RLS policy and confirm this account is allowlisted.");
+    return;
+  }
   closeCafeDetails();
-  if(await loadCafes())toast("Memory removed");
+  const reloaded=await loadCafes();
+  if(!reloaded){showApiError("Memory deleted, but the journal could not be refreshed","Reload the page to see the latest data.");return}
+  if(paths.length){
+    const {data:removedPhotos,error:storageError}=await sb.storage.from("cafe-photos").remove(paths);
+    if(storageError){showApiError("Memory deleted, but photo cleanup failed",storageError);return}
+    if(Array.isArray(removedPhotos)&&removedPhotos.length<paths.length){
+      toast(`Memory removed, but Supabase only confirmed ${removedPhotos.length} of ${paths.length} photos deleted. Check the Storage delete policy.`);
+      return;
+    }
+  }
+  toast("Memory removed");
   }catch(error){showApiError("Could not delete café",error)}
 }
 function editCafe(id){if(!currentUser){showAuth();return}const c=cafes.find(x=>x.id===id);if(c){closeCafeDetails();openModal(c)}}
@@ -347,7 +398,7 @@ $("authForm").addEventListener("submit",async e=>{
   try{
     const res=await sb.auth.signInWithPassword({email,password});
     if(res.error){showApiError("Sign-in failed",res.error,$("authMessage"));return}
-    showApp(res.data.user);loadCafes();
+    $("authMessage").textContent="Signed in. Loading your journal…";
   }catch(error){showApiError("Sign-in failed",error,$("authMessage"))}
 });
 $("authForm").querySelectorAll("input").forEach(input=>input.addEventListener("focus",()=>{
@@ -383,8 +434,14 @@ document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",(
     else session=data?.session||null;
   }catch(error){showApiError("Could not restore sign-in session",error)}
   showApp(session?.user||null);
-  await loadCafes();
-  sb.auth.onAuthStateChange((_event,session)=>{showApp(session?.user||null);loadCafes()});
+  if(session?.user)await Promise.all([loadCafes(),refreshDeletePermission()]);
+  sb.auth.onAuthStateChange((event,session)=>{
+    if(event!=="SIGNED_IN"&&event!=="SIGNED_OUT")return;
+    const nextUser=session?.user||null;
+    if(nextUser?.id===currentUser?.id)return;
+    showApp(nextUser);
+    if(nextUser)setTimeout(()=>{loadCafes();refreshDeletePermission()},0);
+  });
 })();
 
 function openLightbox(cafeId,index){
