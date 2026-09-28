@@ -14,6 +14,38 @@ let currentUser = null;
 const photoObjectUrls = new Set();
 // Must match the user ID in the Supabase DELETE RLS policies.
 const deleteAllowedUserIds = new Set(["3104249e-192a-48cf-a54a-b2df2687c17c"]);
+const cafePageSize=10;
+const cafePages={all:1,favourites:1};
+
+let apiRequestId=0;
+let apiLoaderTimer=null;
+const activeApiRequests=new Map();
+function latestApiLabel(){return Array.from(activeApiRequests.values()).pop()||"Working…"}
+function startApiLoading(label){
+  const id=++apiRequestId;
+  activeApiRequests.set(id,label);
+  if(!apiLoaderTimer&&!$("apiLoader").classList.contains("show")){
+    apiLoaderTimer=setTimeout(()=>{
+      apiLoaderTimer=null;
+      if(!activeApiRequests.size)return;
+      $("apiLoaderText").textContent=latestApiLabel();
+      $("apiLoader").classList.remove("hidden");
+      $("apiLoader").classList.add("show");
+    },140);
+  }else if(!$("apiLoader").classList.contains("hidden")){
+    $("apiLoaderText").textContent=latestApiLabel();
+  }
+  return ()=>{
+    activeApiRequests.delete(id);
+    if(!activeApiRequests.size){
+      clearTimeout(apiLoaderTimer);apiLoaderTimer=null;
+      $("apiLoader").classList.remove("show");
+      $("apiLoader").classList.add("hidden");
+    }else if(!$("apiLoader").classList.contains("hidden")){
+      $("apiLoaderText").textContent=latestApiLabel();
+    }
+  };
+}
 
 function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),9000); }
 function apiErrorText(error){
@@ -66,8 +98,9 @@ function showApp(user){
 
 async function loadCafes(){
   if(!sb||!currentUser){cafes=[];render();return false}
+  const finishLoading=startApiLoading("Loading café journal…");
   try{
-  const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("visited_at",{ascending:false}).order("created_at",{ascending:false});
+  const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("created_at",{ascending:false}).order("id",{ascending:false});
   if(error){ showApiError("Could not load café entries",error); return false; }
   cafes=data||[];
   await attachPhotoUrls(cafes);
@@ -79,6 +112,7 @@ async function loadCafes(){
   }
   return true;
   }catch(error){showApiError("Could not load café entries",error);return false}
+  finally{finishLoading()}
 }
 
 async function attachPhotoUrls(list){
@@ -145,10 +179,37 @@ function render(){
     const r=Number(c.overall_rating || overall(c) || 0);
     return (!q||text.includes(q)) && (!vibe||c.vibe===vibe) && (!rf||(rf==="5"?r>=5:r>=Number(rf)));
   });
+  const favourites=cafes.filter(c=>c.favourite);
+  cafePages.all=Math.min(cafePages.all,Math.max(1,Math.ceil(filtered.length/cafePageSize)));
+  cafePages.favourites=Math.min(cafePages.favourites,Math.max(1,Math.ceil(favourites.length/cafePageSize)));
   renderStats();
   renderGrid("recentGrid",cafes.slice(0,6));
-  renderGrid("allGrid",filtered);
-  renderGrid("favGrid",cafes.filter(c=>c.favourite));
+  renderGrid("allGrid",filtered.slice((cafePages.all-1)*cafePageSize,cafePages.all*cafePageSize));
+  renderGrid("favGrid",favourites.slice((cafePages.favourites-1)*cafePageSize,cafePages.favourites*cafePageSize));
+  renderPagination("allPagination",filtered.length,cafePages.all,"all");
+  renderPagination("favPagination",favourites.length,cafePages.favourites,"favourites");
+}
+
+function renderPagination(id,total,page,view){
+  const nav=$(id);if(!nav)return;
+  const pageCount=Math.ceil(total/cafePageSize);
+  nav.replaceChildren();
+  if(pageCount<=1){nav.classList.add("hidden");return}
+  nav.classList.remove("hidden");
+  const previous=document.createElement("button");
+  previous.type="button";previous.className="secondary";previous.textContent="← Previous";previous.disabled=page<=1;
+  previous.addEventListener("click",()=>changeCafePage(view,-1));
+  const status=document.createElement("span");status.className="pagination-status";status.textContent=`Page ${page} of ${pageCount} · ${total} cafés`;
+  const next=document.createElement("button");
+  next.type="button";next.className="secondary";next.textContent="Next →";next.disabled=page>=pageCount;
+  next.addEventListener("click",()=>changeCafePage(view,1));
+  nav.append(previous,status,next);
+}
+
+function changeCafePage(view,delta){
+  cafePages[view]+=delta;
+  render();
+  $(view==="all"?"allGrid":"favGrid").scrollIntoView({behavior:"smooth",block:"start"});
 }
 
 function renderStats(){
@@ -286,6 +347,7 @@ async function saveCafe(e){
   saveButton.classList.add("is-loading");
   saveButton.setAttribute("aria-busy","true");
   saveButton.textContent="Saving…";
+  const finishLoading=startApiLoading("Saving café memory…");
   try{
     const row={
       name:$("cafeName").value.trim(),area:$("area").value.trim()||null,visited_at:$("visitedAt").value||null,had:$("had").value.trim()||null,
@@ -312,6 +374,7 @@ async function saveCafe(e){
   }catch(error){
     showApiError("Could not save café",error);
   }finally{
+    finishLoading();
     saveButton.disabled=false;
     saveButton.classList.remove("is-loading");
     saveButton.removeAttribute("aria-busy");
@@ -322,6 +385,7 @@ async function deleteCafe(id){
   if(!currentUser){showAuth();return}
   if(!canDeleteCafes()){toast("This account does not have permission to delete cafés.");return}
   if(!confirm("Delete this café memory?")) return;
+  const finishLoading=startApiLoading("Deleting café memory…");
   try{
   const {data:photos,error:photoQueryError}=await sb.from("cafe_photos").select("path").eq("cafe_id",id);
   if(photoQueryError){showApiError("Could not load café photos for deletion",photoQueryError);return}
@@ -346,6 +410,7 @@ async function deleteCafe(id){
   }
   toast("Memory removed");
   }catch(error){showApiError("Could not delete café",error)}
+  finally{finishLoading()}
 }
 function editCafe(id){if(!currentUser){showAuth();return}const c=cafes.find(x=>x.id===id);if(c){closeCafeDetails();openModal(c)}}
 async function toggleFavourite(id){
@@ -355,6 +420,7 @@ async function toggleFavourite(id){
   const nextFavourite=!cafe.favourite;
   const buttons=[...document.querySelectorAll(`.heart[data-cafe-id="${id}"]`)];
   buttons.forEach(button=>button.disabled=true);
+  const finishLoading=startApiLoading("Updating favourite…");
   try{
     const {error}=await sb.from("cafes").update({favourite:nextFavourite}).eq("id",id);
     if(error){buttons.forEach(button=>button.disabled=false);showApiError("Could not update favourite",error);return}
@@ -364,18 +430,20 @@ async function toggleFavourite(id){
   }catch(error){
     buttons.forEach(button=>button.disabled=false);
     showApiError("Could not update favourite",error);
-  }
+  }finally{finishLoading()}
 }
 
 $("authForm").addEventListener("submit",async e=>{
   e.preventDefault();if(!sb){showAuth();return}
   const email=$("email").value.trim(),password=$("password").value;
   $("authMessage").textContent="Working…";
+  const finishLoading=startApiLoading("Signing in…");
   try{
     const res=await sb.auth.signInWithPassword({email,password});
     if(res.error){showApiError("Sign-in failed",res.error,$("authMessage"));return}
     $("authMessage").textContent="Signed in. Loading your journal…";
   }catch(error){showApiError("Sign-in failed",error,$("authMessage"))}
+  finally{finishLoading()}
 });
 $("authForm").querySelectorAll("input").forEach(input=>input.addEventListener("focus",()=>{
   setTimeout(()=>input.scrollIntoView({block:"nearest",behavior:"smooth"}),250);
@@ -387,28 +455,34 @@ if(window.visualViewport){
 $("signIn").addEventListener("click",showAuth);
 $("authClose").addEventListener("click",()=>$("authView").classList.add("hidden"));
 $("signOut").addEventListener("click",async()=>{
+  const finishLoading=startApiLoading("Signing out…");
   try{
     const {error}=await sb.auth.signOut();
     if(error){showApiError("Sign-out failed",error);return}
     showApp(null);
   }catch(error){showApiError("Sign-out failed",error)}
+  finally{finishLoading()}
 });
 $("detailClose").addEventListener("click",closeCafeDetails);
 $("detailView").addEventListener("click",e=>{if(e.target.id==="detailView")closeCafeDetails()});
 $("addCafe").addEventListener("click",()=>openModal());
 $("closeModal").addEventListener("click",closeModal);$("cancelModal").addEventListener("click",closeModal);
 $("cafeForm").addEventListener("submit",saveCafe);
-$("search").addEventListener("input",render);$("vibeFilter").addEventListener("change",render);$("ratingFilter").addEventListener("change",render);
+$("search").addEventListener("input",()=>{cafePages.all=1;render()});
+$("vibeFilter").addEventListener("change",()=>{cafePages.all=1;render()});
+$("ratingFilter").addEventListener("change",()=>{cafePages.all=1;render()});
 document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",()=>switchView(b.dataset.view)));
 
 (async()=>{
   if(!sb){showApp(null);showAuth();return}
   let session=null;
+  const finishLoading=startApiLoading("Restoring sign-in…");
   try{
     const {data,error}=await sb.auth.getSession();
     if(error)showApiError("Could not restore sign-in session",error);
     else session=data?.session||null;
   }catch(error){showApiError("Could not restore sign-in session",error)}
+  finally{finishLoading()}
   showApp(session?.user||null);
   if(session?.user)await loadCafes();
   sb.auth.onAuthStateChange((event,session)=>{

@@ -11,6 +11,7 @@
 <body>
   <div id="ambientPhotos" class="ambient-photos" aria-hidden="true"></div>
   <div id="toast" class="toast" role="alert" aria-live="assertive" aria-atomic="true"></div>
+  <div id="apiLoader" class="api-loader hidden" role="status" aria-live="polite"><span class="api-spinner" aria-hidden="true"></span><span id="apiLoaderText">Working…</span></div>
 
   <section id="authView" class="auth-shell hidden">
     <div class="auth-card">
@@ -85,11 +86,13 @@
           <select id="ratingFilter"><option value="">Any rating</option><option value="5">5 ⭐</option><option value="4">4+ ⭐</option><option value="3">3+ ⭐</option></select>
         </section>
         <div id="allGrid" class="cafe-grid"></div>
+        <nav id="allPagination" class="pagination hidden" aria-label="All cafés pages"></nav>
       </div>
 
       <div id="favouritesView" class="view hidden">
         <section class="section-head"><div><p class="eyebrow">THE SHORTLIST</p><h3>♥ Cafés to return to</h3></div></section>
         <div id="favGrid" class="cafe-grid"></div>
+        <nav id="favPagination" class="pagination hidden" aria-label="Favourite cafés pages"></nav>
       </div>
     </main>
   </section>
