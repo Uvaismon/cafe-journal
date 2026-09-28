@@ -174,11 +174,15 @@ async function saveCafe(e){
 async function deleteCafe(id){
   if(!currentUser){showAuth();return}
   if(!confirm("Delete this café memory?")) return;
-  const cafe=cafes.find(x=>x.id===id);
-  if(cafe?.photoUrls?.length){
-    await sb.from("cafe_photos").delete().eq("cafe_id",id);
-    await sb.storage.from("cafe-photos").remove(cafe.photoUrls.map(p=>p.path));
+  const {data:photos,error:photoQueryError}=await sb.from("cafe_photos").select("path").eq("cafe_id",id);
+  if(photoQueryError){toast("Could not load café photos for deletion: "+photoQueryError.message);return}
+
+  const paths=(photos||[]).map(photo=>photo.path).filter(Boolean);
+  if(paths.length){
+    const {error:storageError}=await sb.storage.from("cafe-photos").remove(paths);
+    if(storageError){toast("Could not delete café photos: "+storageError.message);return}
   }
+
   const {error}=await sb.from("cafes").delete().eq("id",id);
   if(error){toast(error.message);return}
   await loadCafes();toast("Memory removed");
