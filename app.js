@@ -100,7 +100,7 @@ async function loadCafes(){
   if(!sb||!currentUser){cafes=[];render();return false}
   const finishLoading=startApiLoading("Loading café journal…");
   try{
-  const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("created_at",{ascending:false}).order("id",{ascending:false});
+  const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("visited_at",{ascending:false,nullsFirst:false}).order("created_at",{ascending:false}).order("id",{ascending:false});
   if(error){ showApiError("Could not load café entries",error); return false; }
   cafes=data||[];
   await attachPhotoUrls(cafes);
