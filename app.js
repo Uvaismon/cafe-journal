@@ -12,7 +12,8 @@ let lightboxPhotos = [];
 let lightboxIndex = 0;
 let currentUser = null;
 const photoObjectUrls = new Set();
-let deletePermission = false;
+// Must match the user ID in the Supabase DELETE RLS policies.
+const deleteAllowedUserIds = new Set(["3104249e-192a-48cf-a54a-b2df2687c17c"]);
 
 function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),9000); }
 function apiErrorText(error){
@@ -29,7 +30,7 @@ function esc(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&l
 function stars(v){ if(!v) return "—"; const n=Math.round(Number(v)); return "★".repeat(n)+"☆".repeat(5-n); }
 function overall(c){ const vals=[c.coffee,c.food,c.ambience,c.wifi].filter(v=>v!=null && v!=="").map(Number); return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null; }
 function dateText(d){ if(!d) return "No date"; const x=new Date(d+"T00:00:00"); return x.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
-function canDeleteCafes(){return !!currentUser && deletePermission;}
+function canDeleteCafes(){return !!currentUser && deleteAllowedUserIds.has(currentUser.id);}
 
 function showAuth(){
   $("authView").classList.remove("hidden");
@@ -45,7 +46,6 @@ function syncAuthViewport(){
 }
 function showApp(user){
   const nextUser=user||null;
-  if(currentUser?.id!==nextUser?.id)deletePermission=false;
   currentUser=nextUser;
   const authenticated=!!currentUser;
   $("authView").classList.toggle("hidden",authenticated);
@@ -79,30 +79,6 @@ async function loadCafes(){
   }
   return true;
   }catch(error){showApiError("Could not load café entries",error);return false}
-}
-
-async function refreshDeletePermission(){
-  if(!sb||!currentUser){deletePermission=false;render();return false}
-  const userId=currentUser.id;
-  try{
-    const {data,error}=await sb.rpc("can_delete_cafes");
-    if(error)throw error;
-    if(currentUser?.id!==userId)return false;
-    deletePermission=data===true;
-    render();
-    if(!$("detailView").classList.contains("hidden")){
-      const cafe=cafes.find(item=>item.id===$("detailContent").dataset.cafeId);
-      if(cafe)renderCafeDetails(cafe);
-    }
-    return deletePermission;
-  }catch(error){
-    if(currentUser?.id===userId){
-      deletePermission=false;
-      render();
-      showApiError("Could not verify delete permission",error);
-    }
-    return false;
-  }
 }
 
 async function attachPhotoUrls(list){
@@ -434,13 +410,13 @@ document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",(
     else session=data?.session||null;
   }catch(error){showApiError("Could not restore sign-in session",error)}
   showApp(session?.user||null);
-  if(session?.user)await Promise.all([loadCafes(),refreshDeletePermission()]);
+  if(session?.user)await loadCafes();
   sb.auth.onAuthStateChange((event,session)=>{
     if(event!=="SIGNED_IN"&&event!=="SIGNED_OUT")return;
     const nextUser=session?.user||null;
     if(nextUser?.id===currentUser?.id)return;
     showApp(nextUser);
-    if(nextUser)setTimeout(()=>{loadCafes();refreshDeletePermission()},0);
+    if(nextUser)setTimeout(()=>loadCafes(),0);
   });
 })();
 

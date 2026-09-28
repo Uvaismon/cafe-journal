@@ -44,18 +44,6 @@ create table if not exists public.cafe_photos (
 alter table public.cafes enable row level security;
 alter table public.cafe_photos enable row level security;
 
-create or replace function public.can_delete_cafes()
-returns boolean
-language sql
-stable
-security invoker
-set search_path = public, pg_temp
-as $$
-  select (select auth.uid())='3104249e-192a-48cf-a54a-b2df2687c17c'::uuid
-$$;
-revoke all on function public.can_delete_cafes() from public, anon;
-grant execute on function public.can_delete_cafes() to authenticated;
-
 -- Clear prior app policies; multiple permissive policies combine with OR.
 do $$
 declare p record;
@@ -72,7 +60,7 @@ for insert to authenticated with check (true);
 create policy "Editors can update cafes" on public.cafes
 for update to authenticated using (true) with check (true);
 create policy "Only approved editors can delete cafes" on public.cafes
-for delete to authenticated using (public.can_delete_cafes());
+for delete to authenticated using ((select auth.uid())='3104249e-192a-48cf-a54a-b2df2687c17c'::uuid);
 grant select,insert,update,delete on public.cafes to authenticated;
 revoke all on public.cafes from anon;
 
@@ -81,7 +69,7 @@ for select to authenticated using ((select auth.uid()) is not null);
 create policy "Editors can add cafe photos" on public.cafe_photos
 for insert to authenticated with check (true);
 create policy "Only approved editors can delete cafe photo records" on public.cafe_photos
-for delete to authenticated using (public.can_delete_cafes());
+for delete to authenticated using ((select auth.uid())='3104249e-192a-48cf-a54a-b2df2687c17c'::uuid);
 grant select,insert,delete on public.cafe_photos to authenticated;
 revoke all on public.cafe_photos from anon;
 
@@ -108,4 +96,4 @@ for select to authenticated using (bucket_id='cafe-photos' and (select auth.uid(
 create policy "Editors can upload cafe photos" on storage.objects
 for insert to authenticated with check (bucket_id='cafe-photos' and (storage.foldername(name))[1]=(select auth.uid())::text);
 create policy "Only approved editors can delete cafe photo files" on storage.objects
-for delete to authenticated using (bucket_id='cafe-photos' and public.can_delete_cafes());
+for delete to authenticated using (bucket_id='cafe-photos' and (select auth.uid())='3104249e-192a-48cf-a54a-b2df2687c17c'::uuid);
