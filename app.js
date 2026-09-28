@@ -20,7 +20,15 @@ function dateText(d){ if(!d) return "No date"; const x=new Date(d+"T00:00:00"); 
 
 function showAuth(){
   $("authView").classList.remove("hidden");
+  syncAuthViewport();
   if(!configured) $("authMessage").textContent="Set up config.js first — see README.md.";
+}
+function syncAuthViewport(){
+  const viewport=window.visualViewport;
+  if(!viewport)return;
+  const auth=$("authView");
+  auth.style.setProperty("--visual-viewport-height",`${viewport.height}px`);
+  auth.style.setProperty("--visual-viewport-offset-top",`${viewport.offsetTop}px`);
 }
 function showApp(user){
   $("authView").classList.add("hidden");
@@ -185,6 +193,13 @@ $("authForm").addEventListener("submit",async e=>{
   if(res.error){$("authMessage").textContent=res.error.message;return}
   showApp(res.data.user);loadCafes();
 });
+$("authForm").querySelectorAll("input").forEach(input=>input.addEventListener("focus",()=>{
+  setTimeout(()=>input.scrollIntoView({block:"nearest",behavior:"smooth"}),250);
+}));
+if(window.visualViewport){
+  window.visualViewport.addEventListener("resize",syncAuthViewport);
+  window.visualViewport.addEventListener("scroll",syncAuthViewport);
+}
 $("signIn").addEventListener("click",showAuth);
 $("authClose").addEventListener("click",()=>$("authView").classList.add("hidden"));
 $("signOut").addEventListener("click",async()=>{await sb.auth.signOut();showApp(null)});
