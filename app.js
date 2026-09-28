@@ -151,25 +151,41 @@ async function uploadPhotos(cafeId, files){
 
 async function saveCafe(e){
   e.preventDefault(); if(!sb||!currentUser) return;
-  const row={
-    name:$("cafeName").value.trim(),area:$("area").value.trim()||null,visited_at:$("visitedAt").value||null,had:$("had").value.trim()||null,
-    coffee:$("coffee").value?Number($("coffee").value):null,food:$("food").value?Number($("food").value):null,
-    ambience:$("ambience").value?Number($("ambience").value):null,wifi:$("wifi").value?Number($("wifi").value):null,
-    spend:$("spend").value?Number($("spend").value):null,vibe:$("vibe").value||null,favourite:$("favourite").value==="true",
-    revisit:$("revisit").value,notes:$("notes").value.trim()||null
-  };
-  let res;
-  let cafeId=editingId;
-  if(editingId){
-    res=await sb.from("cafes").update(row).eq("id",editingId).select("id").single();
-  } else {
-    res=await sb.from("cafes").insert(row).select("id").single();
-    cafeId=res.data?.id;
+  const saveButton=$("saveCafe");
+  if(saveButton.disabled)return;
+  const originalLabel=saveButton.textContent;
+  saveButton.disabled=true;
+  saveButton.classList.add("is-loading");
+  saveButton.setAttribute("aria-busy","true");
+  saveButton.textContent="Saving…";
+  try{
+    const row={
+      name:$("cafeName").value.trim(),area:$("area").value.trim()||null,visited_at:$("visitedAt").value||null,had:$("had").value.trim()||null,
+      coffee:$("coffee").value?Number($("coffee").value):null,food:$("food").value?Number($("food").value):null,
+      ambience:$("ambience").value?Number($("ambience").value):null,wifi:$("wifi").value?Number($("wifi").value):null,
+      spend:$("spend").value?Number($("spend").value):null,vibe:$("vibe").value||null,favourite:$("favourite").value==="true",
+      revisit:$("revisit").value,notes:$("notes").value.trim()||null
+    };
+    let res;
+    let cafeId=editingId;
+    if(editingId){
+      res=await sb.from("cafes").update(row).eq("id",editingId).select("id").single();
+    } else {
+      res=await sb.from("cafes").insert(row).select("id").single();
+      cafeId=res.data?.id;
+    }
+    if(res.error){toast(res.error.message);return}
+    if(cafeId && pendingPhotos.length) await uploadPhotos(cafeId,pendingPhotos);
+    const wasEdit=!!editingId;
+    closeModal();await loadCafes();toast(wasEdit?"Memory updated ♥":"Café saved ♥");
+  }catch(error){
+    toast("Could not save memory: "+(error?.message||"Please try again."));
+  }finally{
+    saveButton.disabled=false;
+    saveButton.classList.remove("is-loading");
+    saveButton.removeAttribute("aria-busy");
+    saveButton.textContent=originalLabel;
   }
-  if(res.error){toast(res.error.message);return}
-  if(cafeId && pendingPhotos.length) await uploadPhotos(cafeId,pendingPhotos);
-  const wasEdit=!!editingId;
-  closeModal();await loadCafes();toast(wasEdit?"Memory updated ♥":"Café saved ♥");
 }
 async function deleteCafe(id){
   if(!currentUser){showAuth();return}
