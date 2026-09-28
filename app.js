@@ -11,12 +11,25 @@ let pendingPhotos = [];
 let lightboxPhotos = [];
 let lightboxIndex = 0;
 let currentUser = null;
+// Keep this allowlist in sync with the Supabase DELETE RLS policies.
+const deleteAllowedUserIds = new Set(["3104249e-192a-48cf-a54a-b2df2687c17c"]);
 
-function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),2600); }
+function toast(msg){ $("toast").textContent=msg; $("toast").classList.add("show"); setTimeout(()=>$("toast").classList.remove("show"),9000); }
+function apiErrorText(error){
+  if(typeof error==="string")return error;
+  if(!error)return "Unknown API error.";
+  const parts=[error.message,error.details,error.hint,error.code?`Code: ${error.code}`:null].filter(Boolean);
+  return parts.length?parts.join(" — "):String(error);
+}
+function showApiError(context,error,target){
+  const message=`${context}: ${apiErrorText(error)}`;
+  if(target)target.textContent=message;else toast(message);
+}
 function esc(s=""){ return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c])); }
 function stars(v){ if(!v) return "—"; const n=Math.round(Number(v)); return "★".repeat(n)+"☆".repeat(5-n); }
 function overall(c){ const vals=[c.coffee,c.food,c.ambience,c.wifi].filter(v=>v!=null && v!=="").map(Number); return vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1) : null; }
 function dateText(d){ if(!d) return "No date"; const x=new Date(d+"T00:00:00"); return x.toLocaleDateString(undefined,{day:"numeric",month:"short",year:"numeric"}); }
+function canDeleteCafes(){return !!currentUser && deleteAllowedUserIds.has(currentUser.id);}
 
 function showAuth(){
   $("authView").classList.remove("hidden");
@@ -42,9 +55,10 @@ function showApp(user){
 }
 
 async function loadCafes(){
-  if(!sb) return;
+  if(!sb) return false;
+  try{
   const {data,error}=await sb.from("cafes").select("*, cafe_photos(id,path)").order("visited_at",{ascending:false}).order("created_at",{ascending:false});
-  if(error){ toast(error.message); return; }
+  if(error){ showApiError("Could not load café entries",error); return false; }
   cafes=data||[];
   await attachPhotoUrls(cafes);
   renderAmbientPhotos();
@@ -53,6 +67,8 @@ async function loadCafes(){
     const selected=cafes.find(cafe=>cafe.id===$("detailContent").dataset.cafeId);
     if(selected)renderCafeDetails(selected);
   }
+  return true;
+  }catch(error){showApiError("Could not load café entries",error);return false}
 }
 
 async function attachPhotoUrls(list){
@@ -136,11 +152,11 @@ function renderGrid(id, list){
     return `<article class="cafe-card" tabindex="0" aria-label="View details for ${esc(c.name)}" onclick="openCafeDetails('${c.id}',event)" onkeydown="openCafeDetails('${c.id}',event)">
       <div class="top"><div><h4>${esc(c.name)}</h4><div class="location">${esc(c.area||"A little corner somewhere")}</div></div><button type="button" class="heart" data-cafe-id="${c.id}" aria-label="${c.favourite?"Remove from favourites":"Add to favourites"}" aria-pressed="${!!c.favourite}" onclick="event.stopPropagation();toggleFavourite('${c.id}')">${c.favourite?"♥":"♡"}</button></div>
       <div class="rating">${stars(r)} <span style="color:#7a6f68;font-size:11px">${r?` ${r}`:""}</span></div>
-      ${c.vibe?`<span class="tag">${esc(c.vibe)}</span>`:""} ${c.revisit==="Yes"?'<span class="tag" style="background:#eaf0e5">↻ Revisit</span>':""}
+      ${c.vibe||c.revisit==="Yes"?`<div class="card-tags">${c.vibe?`<span class="tag">${esc(c.vibe)}</span>`:""}${c.revisit==="Yes"?'<span class="tag revisit-tag"><span aria-hidden="true">↻</span> Revisit</span>':""}</div>`:""}
       ${c.notes?`<p class="note">“${esc(c.notes)}”</p>`:""}
       ${c.photoUrls?.length?`<div class="cafe-photos">${c.photoUrls.slice(0,3).map((p,i)=>`<img class="cafe-photo" src="${p.url}" alt="Café photo" onclick="event.stopPropagation();openLightbox('${c.id}',${i})">`).join("")}${c.photoUrls.length>3?`<span class="photo-count">+${c.photoUrls.length-3} more</span>`:""}</div>`:""}
       <div class="meta"><span>${dateText(c.visited_at)}</span><span>${c.spend?`₹${Number(c.spend).toLocaleString("en-IN")}`:""}</span></div>
-      ${currentUser?`<div class="card-actions"><button onclick="event.stopPropagation();editCafe('${c.id}')">Edit</button><button onclick="event.stopPropagation();deleteCafe('${c.id}')">Delete</button></div>`:""}
+      ${currentUser?`<div class="card-actions"><button onclick="event.stopPropagation();editCafe('${c.id}')">Edit</button>${canDeleteCafes()?`<button onclick="event.stopPropagation();deleteCafe('${c.id}')">Delete</button>`:""}</div>`:""}
     </article>`;
   }).join("");
 }
@@ -176,7 +192,7 @@ function renderCafeDetails(c){
       ${c.had?`<section class="detail-panel"><h2>What I had</h2><p>${esc(c.had)}</p></section>`:""}
       ${c.notes?`<section class="detail-panel detail-notes"><h2>Notes</h2><p>${esc(c.notes)}</p></section>`:""}
     </div>
-    ${currentUser?`<div class="detail-actions"><button type="button" class="secondary" onclick="editCafe('${c.id}')">Edit memory</button><button type="button" class="danger-button" onclick="deleteCafe('${c.id}')">Delete memory</button></div>`:""}
+    ${currentUser?`<div class="detail-actions"><button type="button" class="secondary" onclick="editCafe('${c.id}')">Edit memory</button>${canDeleteCafes()?`<button type="button" class="danger-button" onclick="deleteCafe('${c.id}')">Delete memory</button>`:""}</div>`:""}
   `;
 }
 
@@ -212,16 +228,35 @@ $("photos").addEventListener("change", e=>{
 });
 
 async function uploadPhotos(cafeId, files){
-  if(!files.length) return;
-  const user=(await sb.auth.getUser()).data.user;
-  for(const file of files){
-    const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
-    const path=`${user.id}/${cafeId}/${crypto.randomUUID()}-${safe}`;
-    const {error:uploadError}=await sb.storage.from("cafe-photos").upload(path,file,{upsert:false,contentType:file.type});
-    if(uploadError){toast("Photo upload failed: "+uploadError.message);continue;}
-    const {error:rowError}=await sb.from("cafe_photos").insert({cafe_id:cafeId,path});
-    if(rowError){await sb.storage.from("cafe-photos").remove([path]);toast(rowError.message);}
+  if(!files.length) return [];
+  const issues=[];
+  let userData,userError;
+  try{
+    ({data:userData,error:userError}=await sb.auth.getUser());
+  }catch(error){
+    issues.push(`Could not verify editor account: ${apiErrorText(error)}`);
+    return issues;
   }
+  if(userError){issues.push(`Could not verify editor account: ${apiErrorText(userError)}`);return issues}
+  const user=userData?.user;
+  if(!user){issues.push("Could not verify editor account. Sign in again and retry.");return issues}
+  for(const file of files){
+    try{
+      const safe=file.name.replace(/[^a-zA-Z0-9._-]/g,"_");
+      const path=`${user.id}/${cafeId}/${crypto.randomUUID()}-${safe}`;
+      const {error:uploadError}=await sb.storage.from("cafe-photos").upload(path,file,{upsert:false,contentType:file.type});
+      if(uploadError){issues.push(`${file.name}: upload failed — ${apiErrorText(uploadError)}`);continue}
+      const {error:rowError}=await sb.from("cafe_photos").insert({cafe_id:cafeId,path});
+      if(rowError){
+        issues.push(`${file.name}: photo record failed — ${apiErrorText(rowError)}`);
+        const {error:cleanupError}=await sb.storage.from("cafe-photos").remove([path]);
+        if(cleanupError)issues.push(`${file.name}: cleanup failed — ${apiErrorText(cleanupError)}`);
+      }
+    }catch(error){
+      issues.push(`${file.name}: ${apiErrorText(error)}`);
+    }
+  }
+  return issues;
 }
 
 async function saveCafe(e){
@@ -249,12 +284,15 @@ async function saveCafe(e){
       res=await sb.from("cafes").insert(row).select("id").single();
       cafeId=res.data?.id;
     }
-    if(res.error){toast(res.error.message);return}
-    if(cafeId && pendingPhotos.length) await uploadPhotos(cafeId,pendingPhotos);
+    if(res.error){showApiError("Could not save café",res.error);return}
+    const photoIssues=cafeId && pendingPhotos.length?await uploadPhotos(cafeId,pendingPhotos):[];
     const wasEdit=!!editingId;
-    closeModal();await loadCafes();toast(wasEdit?"Memory updated ♥":"Café saved ♥");
+    closeModal();
+    if(!await loadCafes())return;
+    const savedMessage=wasEdit?"Memory updated ♥":"Café saved ♥";
+    toast(photoIssues.length?`${savedMessage} Photo errors: ${photoIssues.join(" | ")}`:savedMessage);
   }catch(error){
-    toast("Could not save memory: "+(error?.message||"Please try again."));
+    showApiError("Could not save café",error);
   }finally{
     saveButton.disabled=false;
     saveButton.classList.remove("is-loading");
@@ -264,19 +302,23 @@ async function saveCafe(e){
 }
 async function deleteCafe(id){
   if(!currentUser){showAuth();return}
+  if(!canDeleteCafes()){toast("This account does not have permission to delete cafés.");return}
   if(!confirm("Delete this café memory?")) return;
+  try{
   const {data:photos,error:photoQueryError}=await sb.from("cafe_photos").select("path").eq("cafe_id",id);
-  if(photoQueryError){toast("Could not load café photos for deletion: "+photoQueryError.message);return}
+  if(photoQueryError){showApiError("Could not load café photos for deletion",photoQueryError);return}
 
   const paths=(photos||[]).map(photo=>photo.path).filter(Boolean);
   if(paths.length){
     const {error:storageError}=await sb.storage.from("cafe-photos").remove(paths);
-    if(storageError){toast("Could not delete café photos: "+storageError.message);return}
+    if(storageError){showApiError("Could not delete café photos",storageError);return}
   }
 
   const {error}=await sb.from("cafes").delete().eq("id",id);
-  if(error){toast(error.message);return}
-  await loadCafes();closeCafeDetails();toast("Memory removed");
+  if(error){showApiError("Could not delete café",error);return}
+  closeCafeDetails();
+  if(await loadCafes())toast("Memory removed");
+  }catch(error){showApiError("Could not delete café",error)}
 }
 function editCafe(id){if(!currentUser){showAuth();return}const c=cafes.find(x=>x.id===id);if(c){closeCafeDetails();openModal(c)}}
 async function toggleFavourite(id){
@@ -288,13 +330,13 @@ async function toggleFavourite(id){
   buttons.forEach(button=>button.disabled=true);
   try{
     const {error}=await sb.from("cafes").update({favourite:nextFavourite}).eq("id",id);
-    if(error){buttons.forEach(button=>button.disabled=false);toast("Could not update favourite: "+error.message);return}
+    if(error){buttons.forEach(button=>button.disabled=false);showApiError("Could not update favourite",error);return}
     cafe.favourite=nextFavourite;
     render();
     if(!$("detailView").classList.contains("hidden"))renderCafeDetails(cafe);
   }catch(error){
     buttons.forEach(button=>button.disabled=false);
-    toast("Could not update favourite: "+(error?.message||"Please try again."));
+    showApiError("Could not update favourite",error);
   }
 }
 
@@ -302,9 +344,11 @@ $("authForm").addEventListener("submit",async e=>{
   e.preventDefault();if(!sb){showAuth();return}
   const email=$("email").value.trim(),password=$("password").value;
   $("authMessage").textContent="Working…";
-  const res=await sb.auth.signInWithPassword({email,password});
-  if(res.error){$("authMessage").textContent=res.error.message;return}
-  showApp(res.data.user);loadCafes();
+  try{
+    const res=await sb.auth.signInWithPassword({email,password});
+    if(res.error){showApiError("Sign-in failed",res.error,$("authMessage"));return}
+    showApp(res.data.user);loadCafes();
+  }catch(error){showApiError("Sign-in failed",error,$("authMessage"))}
 });
 $("authForm").querySelectorAll("input").forEach(input=>input.addEventListener("focus",()=>{
   setTimeout(()=>input.scrollIntoView({block:"nearest",behavior:"smooth"}),250);
@@ -315,7 +359,13 @@ if(window.visualViewport){
 }
 $("signIn").addEventListener("click",showAuth);
 $("authClose").addEventListener("click",()=>$("authView").classList.add("hidden"));
-$("signOut").addEventListener("click",async()=>{await sb.auth.signOut();showApp(null)});
+$("signOut").addEventListener("click",async()=>{
+  try{
+    const {error}=await sb.auth.signOut();
+    if(error){showApiError("Sign-out failed",error);return}
+    showApp(null);
+  }catch(error){showApiError("Sign-out failed",error)}
+});
 $("detailClose").addEventListener("click",closeCafeDetails);
 $("detailView").addEventListener("click",e=>{if(e.target.id==="detailView")closeCafeDetails()});
 $("addCafe").addEventListener("click",()=>openModal());
@@ -326,7 +376,12 @@ document.querySelectorAll("[data-view]").forEach(b=>b.addEventListener("click",(
 
 (async()=>{
   if(!sb){showApp(null);showAuth();return}
-  const {data:{session}}=await sb.auth.getSession();
+  let session=null;
+  try{
+    const {data,error}=await sb.auth.getSession();
+    if(error)showApiError("Could not restore sign-in session",error);
+    else session=data?.session||null;
+  }catch(error){showApiError("Could not restore sign-in session",error)}
   showApp(session?.user||null);
   await loadCafes();
   sb.auth.onAuthStateChange((_event,session)=>{showApp(session?.user||null);loadCafes()});
